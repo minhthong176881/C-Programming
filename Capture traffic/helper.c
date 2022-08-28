@@ -102,36 +102,7 @@ int setup_interface(pcap_if_t *alldevs, pcap_t **descr, pcap_if_t **dev, int inu
 	return 0;
 }
 
-int get_ip_address(pcap_if_t *dev, addr_info *address)
-{
-	pcap_addr_t *a;
-
-	if (!dev || !address)
-	{
-		fprintf(stderr, "%s error\n", __FUNCTION__);
-		return -1;
-	}
-
-	/* IP addresses */
-	for (a = dev->addresses; a; a = a->next)
-	{
-		if (a->addr->sa_family == AF_INET)
-		{
-			address->ip = ((struct sockaddr_in *)a->addr)->sin_addr;
-			address->netmask = ((struct sockaddr_in *)a->netmask)->sin_addr;
-			return 0;
-		}
-	}
-
-	fprintf(stderr, "Cannot get IPv4 info of interface: %s\n", dev->description);
-	return -1;
-}
-
-// int get_mac_address(u_char *mac, struct in_addr destip)
-// {
-// }
-
-int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_char *mac_addr)
+int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_int *src_mac_addr, u_int *dst_mac_addr)
 {
 	int status, frame_length, sd, bytes;
 	char *interface, *target, *src_ip;
@@ -141,7 +112,7 @@ int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_char *mac_a
 	struct sockaddr_in *ipv4;
 	struct sockaddr_ll device;
 	struct ifreq ifr;
-  	arp_hdr *arphdr_recv;
+	arp_hdr *arphdr_recv;
 
 	// Allocate memory for various arrays.
 	src_mac = allocate_ustrmem(6);
@@ -180,6 +151,10 @@ int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_char *mac_a
 	// 	printf ("%02x:", src_mac[i]);
 	// }
 	// printf ("%02x\n", src_mac[5]);
+	for (int i = 0; i < 6; i++)
+	{
+		src_mac_addr[i] = src_mac[i];
+	}
 
 	// Find interface index from interface name and store index in
 	// struct sockaddr_ll device, which will be used as an argument of sendto().
@@ -310,9 +285,7 @@ int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_char *mac_a
 
 	for (int i = 0; i < 6; i++)
 	{
-		sprintf(mac_addr[i], "%02x", arphdr_recv->sender_mac[i]);
-		// mac_addr[i] = (char)arphdr_recv->sender_mac[i];
-		printf("%s", mac_addr[i]);
+		dst_mac_addr[i] = arphdr_recv->sender_mac[i];
 	}
 
 	// Close socket descriptor.
@@ -327,88 +300,6 @@ int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_char *mac_a
 	free(src_ip);
 
 	return 1;
-}
-
-void receive_arp(u_char *mac_addr)
-{
-	int i, sd, status;
-	uint8_t *ether_frame;
-	arp_hdr *arphdr;
-
-	// Allocate memory for various arrays.
-	ether_frame = allocate_ustrmem(IP_MAXPACKET);
-
-	// Submit request for a raw socket descriptor.
-	if ((sd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
-	{
-		perror("socket() failed ");
-		exit(EXIT_FAILURE);
-	}
-
-	// Listen for incoming ethernet frame from socket sd.
-	// We expect an ARP ethernet frame of the form:
-	//     MAC (6 bytes) + MAC (6 bytes) + ethernet type (2 bytes)
-	//     + ethernet data (ARP header) (28 bytes)
-	// Keep at it until we get an ARP reply.
-	arphdr = (arp_hdr *)(ether_frame + 6 + 6 + 2);
-	while (((((ether_frame[12]) << 8) + ether_frame[13]) != ETH_P_ARP) || (ntohs(arphdr->opcode) != ARPOP_REPLY))
-	{
-		if ((status = recv(sd, ether_frame, IP_MAXPACKET, 0)) < 0)
-		{
-			if (errno == EINTR)
-			{
-				memset(ether_frame, 0, IP_MAXPACKET * sizeof(uint8_t));
-				continue; // Something weird happened, but let's try again.
-			}
-			else
-			{
-				perror("recv() failed:");
-				exit(EXIT_FAILURE);
-			}
-		}
-	}
-	close(sd);
-
-	// Print out contents of received ethernet frame.
-	// printf ("\nEthernet frame header:\n");
-	// printf ("Destination MAC (this node): ");
-	// for (i=0; i<5; i++) {
-	// 	printf ("%02x:", ether_frame[i]);
-	// }
-	// printf ("%02x\n", ether_frame[5]);
-	// printf ("Source MAC: ");
-	// for (i=0; i<5; i++) {
-	// 	printf ("%02x:", ether_frame[i+6]);
-	// }
-	// printf ("%02x\n", ether_frame[11]);
-	// Next is ethernet type code (ETH_P_ARP for ARP).
-	// http://www.iana.org/assignments/ethernet-numbers
-	// printf ("Ethernet type code (2054 = ARP): %u\n", ((ether_frame[12]) << 8) + ether_frame[13]);
-	// printf ("\nEthernet data (ARP header):\n");
-	// printf ("Hardware type (1 = ethernet (10 Mb)): %u\n", ntohs (arphdr->htype));
-	// printf ("Protocol type (2048 for IPv4 addresses): %u\n", ntohs (arphdr->ptype));
-	// printf ("Hardware (MAC) address length (bytes): %u\n", arphdr->hlen);
-	// printf ("Protocol (IPv4) address length (bytes): %u\n", arphdr->plen);
-	// printf ("Opcode (2 = ARP reply): %u\n", ntohs (arphdr->opcode));
-
-	for (i = 0; i < 6; i++)
-	{
-		mac_addr[i] = (char)arphdr->sender_mac[i];
-	}
-
-	// printf ("Sender protocol (IPv4) address: %u.%u.%u.%u\n",
-	// 	arphdr->sender_ip[0], arphdr->sender_ip[1], arphdr->sender_ip[2], arphdr->sender_ip[3]);
-	// printf ("Target (this node) hardware (MAC) address: ");
-	// for (i=0; i<5; i++) {
-	// 	printf ("%02x:", arphdr->target_mac[i]);
-	// }
-	// printf ("%02x\n", arphdr->target_mac[5]);
-	// printf ("Target (this node) protocol (IPv4) address: %u.%u.%u.%u\n",
-	// 	arphdr->target_ip[0], arphdr->target_ip[1], arphdr->target_ip[2], arphdr->target_ip[3]);
-
-	free(ether_frame);
-
-	return;
 }
 
 // Allocate memory for an array of chars.

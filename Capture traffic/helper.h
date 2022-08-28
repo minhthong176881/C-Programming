@@ -31,11 +31,8 @@ void signal_handler(int signal);
 char *get_signal_name(int signal);
 void free_resource(pcap_if_t **alldevs, pcap_t *mirror_descr, pcap_t *send_descr);
 int setup_interface(pcap_if_t *alldevs, pcap_t **descr, pcap_if_t **dev, int inum, int max);
-int get_ip_address(pcap_if_t *dev, addr_info *address);
-int get_mac_address(u_char *mac, struct in_addr destip);
 char *allocate_strmem(int len);
 uint8_t *allocate_ustrmem(int len);
-int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip, u_char *mac_addr);
-void receive_arp(u_char *mac_addr);
+int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip, u_int *src_mac_addr, u_int *dst_mac_addr);
 
 #endif

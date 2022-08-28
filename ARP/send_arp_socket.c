@@ -103,10 +103,10 @@ main (int argc, char **argv)
   memset (dst_mac, 0xff, 6 * sizeof (uint8_t));
   
   // Source IPv4 address:  you need to fill this out
-  strcpy (src_ip, "192.168.74.136");
+  strcpy (src_ip, "192.168.255.145");
   
   // Destination URL or IPv4 address (must be a link-local node): you need to fill this out
-  strcpy (target, "192.168.74.132");
+  strcpy (target, "192.168.100.34");
   
   // Fill out hints for getaddrinfo().
   memset (&hints, 0, sizeof (struct addrinfo));

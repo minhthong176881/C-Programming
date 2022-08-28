@@ -51,7 +51,7 @@
 
 typedef struct addr_info
 {
-    u_char mac[ETHER_ADDR_LEN];
+    u_int mac[ETHER_ADDR_LEN];
     struct in_addr ip;
     struct in_addr netmask;
 } addr_info;
@@ -60,10 +60,10 @@ int setup_interface(pcap_if_t *alldevs, pcap_t **adhandle, pcap_if_t **dev, int 
 int setup_filter(pcap_t *adhandle, pcap_if_t *dev, char *packet_filter);
 void ifprint(pcap_if_t *d, int num);
 char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen);
-// int GetMacAddress(u_char *mac, IN_ADDR destip);
-// int GetIPAddress(pcap_if_t *dev, addr_info *address);
-// int GetGateway(struct in_addr ip, IN_ADDR *gatewayip);
-// int isSameSubnet(addr_info src, addr_info dst);
+int get_ip_address(pcap_if_t *dev, addr_info *address);
+int get_mac_address(u_char *mac, struct in_addr destip);
+int get_gateway_address(struct in_addr ip, char *gatewayip);
+int is_same_subnet(addr_info src, addr_info dst);
 // u_short udp_checksum(const u_short *udp_packet, size_t len, IN_ADDR src_ip, IN_ADDR dst_ip);
 // u_short ip_checksum(u_short *ptr, int nbytes);
 

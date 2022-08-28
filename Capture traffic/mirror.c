@@ -3,7 +3,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <string.h>
-#include <pthread.h>
 #include <signal.h>
 
 #include "adapter.h"
@@ -40,12 +39,6 @@ int main(int argc, char **argv)
         else
             is_sensor_ip_valid = 1;
     } while (is_sensor_ip_valid == 0);
-
-    // if (setup_capture(alldevs, mirror_descr, send_descr, dev1, dev2) < 0)
-    // {
-    //     free_resource(&alldevs, mirror_descr, send_descr);
-    //     return -1;
-    // };
 
     char errbuf[PCAP_ERRBUF_SIZE];
     int i = 0;
@@ -101,21 +94,43 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    // pthread_t receive_arp_thread;
-    // if (pthread_create(&receive_arp_thread, NULL, receive_arp, &vxlan_dst.mac) < 0) 
-    // {
-    //     perror("Could not create thread!");
-    //     return -1;
-    // }
-
     char src_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &vxlan_src.ip, src_ip, sizeof(src_ip));
 
-    if (send_arp(dev1, src_ip, sensor_ip, &vxlan_dst.mac) < 0) 
-    {
-        fprintf(stderr, "Cannot send ARP\n");
-        return -1;
+    int subnet = is_same_subnet(vxlan_src, vxlan_dst);
+    if (subnet == 1) {
+        if (send_arp(dev1, src_ip, sensor_ip, vxlan_src.mac, vxlan_dst.mac) < 0) 
+        {
+            fprintf(stderr, "Cannot send ARP\n");
+            return -1;
+        }
+    } else {
+        char gateway[32];
+        if (get_gateway_address(vxlan_src.ip, gateway) < 0)
+        {
+            free_resource(&alldevs, mirror_descr, send_descr);
+            return -1;
+        }
+        if (send_arp(dev1, src_ip, gateway, vxlan_src.mac, vxlan_dst.mac) < 0) 
+        {
+            fprintf(stderr, "Cannot send ARP\n");
+            return -1;
+        }
     }
+
+    printf("--------------------------------------------------\n");
+
+    printf("Sending IP: %s, MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+		src_ip, vxlan_src.mac[0], vxlan_src.mac[1], vxlan_src.mac[2], vxlan_src.mac[3], vxlan_src.mac[4], vxlan_src.mac[5]);
+
+    printf("Sensor IP: %s, MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+		sensor_ip, vxlan_dst.mac[0], vxlan_dst.mac[1], vxlan_dst.mac[2], vxlan_dst.mac[3], vxlan_dst.mac[4], vxlan_dst.mac[5]);
+
+    printf("\nListening on monitor interface %s...\n", dev1->description);
+	/* start the capture */
+	pcap_loop(mirror_descr, 0, packet_handler, NULL);
+
+	free_resource(&alldevs, mirror_descr, send_descr);
 
     return 1;
 }
