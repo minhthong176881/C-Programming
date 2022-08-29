@@ -20,7 +20,6 @@
 #include <errno.h>
 
 #include "helper.h"
-#include "adapter.h"
 
 char *get_signal_name(int signal)
 {
@@ -37,6 +36,48 @@ char *get_signal_name(int signal)
 	}
 
 	return "Unknown";
+}
+
+char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen)
+{
+    if (!sa || !s)
+        return "Unknown AF";
+
+    memset(s, 0, maxlen);
+
+    switch (sa->sa_family)
+    {
+    case AF_INET:
+        inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr), s, maxlen);
+        break;
+
+    case AF_INET6:
+        inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr),
+                  s, maxlen);
+        break;
+
+    default:
+        strcpy(s, "Unknown AF");
+        return NULL;
+    }
+
+    return s;
+}
+
+int is_same_subnet(addr_info src, addr_info dst)
+{
+    uint32_t netmask = src.netmask.s_addr;
+
+    if (netmask > 0 && (src.ip.s_addr & netmask) == (dst.ip.s_addr & netmask))
+    {
+        VCS_PRINT("\nSending interface IP and sensor IP are in same subnet\n");
+        return 1;
+    }
+    else
+    {
+        VCS_PRINT("\nSending interface IP and sensor IP are not in same subnet\n");
+        return 0;
+    }
 }
 
 void free_resource(pcap_if_t **alldevs, pcap_t *mirror_descr, pcap_t *send_descr)
@@ -102,7 +143,7 @@ int setup_interface(pcap_if_t *alldevs, pcap_t **descr, pcap_if_t **dev, int inu
 	return 0;
 }
 
-int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_int *src_mac_addr, u_int *dst_mac_addr)
+int send_arp(pcap_if_t *dev, char *src_ip_addr, char *dst_ip_addr, u_char *src_mac_addr, u_char *dst_mac_addr)
 {
 	int status, frame_length, sd, bytes;
 	char *interface, *target, *src_ip;

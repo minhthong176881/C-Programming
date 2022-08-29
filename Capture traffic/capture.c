@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "capture.h"
-#include "adapter.h"
 #include "helper.h"
 // #include "build.h"
 
@@ -138,145 +137,97 @@ void parse_device(pcap_if_t *d, int num)
     printf("\n");
 }
 
-void packet_handler(u_char *agrs, const struct pcap_pkthdr *header, const u_char *pkt_data)
+int get_ip_address(pcap_if_t *dev, addr_info *address)
 {
-#ifdef VCS_DEBUG
-#endif
+    pcap_addr_t *a;
 
-    // encapVxLAN(pkt_data);
-    print_packet_info(agrs, header, pkt_data);
-}
-
-void print_packet_info(u_char *agrs, const struct pcap_pkthdr *header, const u_char *pkt_data)
-{
-    u_int16_t type = parse_ethernet_header(agrs, header, pkt_data);
-    if (type == ETHERTYPE_IP)
+    if (!dev || !address)
     {
-        parse_IP(agrs, header, pkt_data);
-    }
-}
-
-u_int16_t parse_ethernet_header(u_char *agrs, const struct pcap_pkthdr *header, const u_char *pkt_data)
-{
-    u_int caplen = header->caplen;
-    u_int length = header->len;
-    struct ether_header *eptr;
-    u_short ether_type;
-
-    // struct ether_addr *addr;
-
-    if (caplen < ETHER_HDR_LEN)
-    {
-        fprintf(stdout, "Packet length less than ethernet header length\n");
+        fprintf(stderr, "%s error\n", __FUNCTION__);
         return -1;
     }
 
-    /* lets start with the ether header... */
-    eptr = (struct ether_header *)pkt_data;
-    ether_type = ntohs(eptr->ether_type);
-
-    /* Lets print SOURCE DEST TYPE LENGTH */
-    // fprintf(stdout,"ETH: ");
-    // fprintf(stdout, "%s ", parse_ethernet_address(eptr->ether_shost));
-    // fprintf(stdout, "%s ", parse_ethernet_address(eptr->ether_dhost));
-    // fprintf(stdout,"%s ", ether_ntoa((struct ether_addr*)eptr->ether_shost));
-    // fprintf(stdout,"%s ", ether_ntoa((struct ether_addr*)eptr->ether_dhost));
-
-    /* check to see if we have an ip packet */
-    if (ether_type == ETHERTYPE_IP)
+    /* IP addresses */
+    for (a = dev->addresses; a; a = a->next)
     {
-        fprintf(stdout, "(IP)");
-    }
-    else if (ether_type == ETHERTYPE_ARP)
-    {
-        fprintf(stdout, "(ARP)");
-    }
-    else if (eptr->ether_type == ETHERTYPE_REVARP)
-    {
-        fprintf(stdout, "(RARP)");
-    }
-    else
-    {
-        fprintf(stdout, "(?)");
-    }
-    fprintf(stdout, " %d\n", length);
-
-    return ether_type;
-}
-
-char *parse_ethernet_address(uint8_t *address)
-{
-    int i = 0;
-    i = ETHER_ADDR_LEN;
-    char *addr = "";
-    printf(" Destination Address:  ");
-    do
-    {
-        char *x = "";
-        sprintf(x, "%02x", *address++);
-        if (i == ETHER_ADDR_LEN)
+        if (a->addr->sa_family == AF_INET)
         {
-            strcat(addr, " ");
+            address->ip = ((struct sockaddr_in *)a->addr)->sin_addr;
+            address->netmask = ((struct sockaddr_in *)a->netmask)->sin_addr;
+            return 0;
         }
-        else
-            strcat(addr, ":");
-        strcat(addr, x);
-        // printf("%s%02x",(i == ETHER_ADDR_LEN) ? " " : ":",*address++);
-    } while (--i > 0);
-    return addr;
+    }
+
+    fprintf(stderr, "Cannot get IPv4 info of interface: %s\n", dev->description);
+    return -1;
 }
 
-u_char *parse_IP(u_char *agrs, const struct pcap_pkthdr *header, const u_char *packet)
+int get_gateway_address(struct in_addr ip, char *gatewayip)
 {
-    const struct ip_header *ip;
-    u_int length = header->len;
-    u_int hlen, off, version;
+    FILE *fp;
+    int status;
+    char output[1024];
 
-    int len;
+    fp = popen("ip route show | grep default", "r");
+    if (fp == NULL) return -1;
 
-    /* jump pass the ethernet header */
-    ip = (struct ip_header *)(packet + sizeof(struct ether_header));
-    length -= sizeof(struct ether_header);
-
-    /* check to see we have a packet of valid length */
-    if (length < sizeof(struct ip_header))
+    while (fgets(output, sizeof(output), fp) != NULL) 
     {
-        printf("truncated ip %d", length);
-        return NULL;
+        char *token = strtok(output, " ");
+        int i = 0;
+        // loop through the string to extract all other tokens
+        while( token != NULL ) {
+            if (i == 2) {
+                strcpy(gatewayip, token);
+                break;
+            }
+            // printf( "%s\n", token ); //printing each token
+            token = strtok(NULL, " ");
+            i++;
+        }
     }
 
-    len = ntohs(ip->ip_len);
-    hlen = IP_HL(ip);   /* header length */
-    version = IP_V(ip); /* ip version */
-
-    /* check version */
-    if (version != 4)
-    {
-        fprintf(stdout, "Unknown version %d\n", version);
-        return NULL;
+    status = pclose(fp);
+    if (status == -1) {
+        return status;
+    } else {
+        return 1;
     }
+}
 
-    /* check header length */
-    if (hlen < 5)
-    {
-        fprintf(stdout, "bad-hlen %d \n", hlen);
+int setup_filter(pcap_t *descr, pcap_if_t *dev, char *packet_filter)
+{
+    u_int netmask;
+	struct bpf_program fcode;
+
+	if (!descr || !dev)
+	{
+		fprintf(stderr, "\nSomething went wrong!\n");
+		return -1;
+	}
+
+	if (dev->addresses != NULL) {
+        if (dev->addresses->netmask != NULL)
+        /* Retrieve the mask of the first address of the interface */
+		    netmask = ((struct sockaddr_in *)(dev->addresses->netmask))->sin_addr.s_addr;
     }
+	else
+		/* If the interface is without addresses we suppose to be in a C class network */
+		netmask = 0xffffff;
 
-    /* see if we have as much packet as we should */
-    if (length < len)
-        printf("\ntruncated IP - %d bytes missing\n", len - length);
+	//compile the filter
+	if (pcap_compile(descr, &fcode, packet_filter, 1, netmask) < 0)
+	{
+		fprintf(stderr, "\nUnable to compile the packet filter. Check the syntax: \"%s\"\n", packet_filter);
+		return -1;
+	}
 
-    /* Check to see if we have the first fragment */
-    off = ntohs(ip->ip_off);
-    if ((off & 0x1fff) == 0) /* aka no 1's in first 13 bits */
-    {                        /* print SOURCE DESTINATION hlen version len offset */
-        fprintf(stdout, "IP: ");
-        fprintf(stdout, "%s ",
-                inet_ntoa(ip->ip_src));
-        fprintf(stdout, "%s %d %d %d %d\n",
-                inet_ntoa(ip->ip_dst),
-                hlen, version, len, off);
-    }
+	//set the filter
+	if (pcap_setfilter(descr, &fcode) < 0)
+	{
+		fprintf(stderr, "\nError setting the filter.\n");
+		return -1;
+	}
 
-    return NULL;
+	return 0;
 }

@@ -5,9 +5,9 @@
 #include <string.h>
 #include <signal.h>
 
-#include "adapter.h"
 #include "capture.h"
 #include "helper.h"
+#include "build.h"
 
 int stop_capture = 0;
 pcap_if_t *alldevs;
@@ -15,9 +15,12 @@ pcap_t *mirror_descr = NULL, *send_descr = NULL;
 pcap_if_t *dev1 = NULL, *dev2 = NULL;
 addr_info vxlan_src, vxlan_dst;
 
+void packet_handler(u_char *agrs, const struct pcap_pkthdr *header, const u_char *pkt_data);
+
 int main(int argc, char **argv)
 {
     char sensor_ip[32];
+    char packet_filter[256];
     int is_sensor_ip_valid = 0;
 
     // signal(SIGINT, signal_handler);
@@ -65,6 +68,15 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    sprintf(packet_filter, "not host %s", sensor_ip);
+
+    /* Setup filter */
+	if (setup_filter(mirror_descr, dev1, packet_filter) < 0)
+	{
+		free_resource(&alldevs, mirror_descr, send_descr);
+		return -1;
+	}
+
     do
     {
         printf("Enter the sending interface number (1-%d):", i);
@@ -87,6 +99,12 @@ int main(int argc, char **argv)
         send_descr = mirror_descr;
         dev2 = dev1;
     }
+
+	if (get_mtu(dev2->name) < 0)
+	{
+        free_resource(&alldevs, mirror_descr, send_descr);
+        return -1;
+	}
 
     if (get_ip_address(dev2, &vxlan_src) < 0)
     {
@@ -123,10 +141,12 @@ int main(int argc, char **argv)
     printf("Sending IP: %s, MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 		src_ip, vxlan_src.mac[0], vxlan_src.mac[1], vxlan_src.mac[2], vxlan_src.mac[3], vxlan_src.mac[4], vxlan_src.mac[5]);
 
-    printf("Sensor IP: %s, MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+    printf("Sensor IP : %s, MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 		sensor_ip, vxlan_dst.mac[0], vxlan_dst.mac[1], vxlan_dst.mac[2], vxlan_dst.mac[3], vxlan_dst.mac[4], vxlan_dst.mac[5]);
 
-    printf("\nListening on monitor interface %s...\n", dev1->description);
+    printf("Mirroring packet filter: %s\n", packet_filter);
+
+    printf("\nListening on monitor interface %s...\n", dev1->name);
 	/* start the capture */
 	pcap_loop(mirror_descr, 0, packet_handler, NULL);
 
@@ -146,4 +166,12 @@ void signal_handler(int signal)
     }
 
     return;
+}
+
+void packet_handler(u_char *agrs, const struct pcap_pkthdr *header, const u_char *pkt_data)
+{
+#ifdef VCS_DEBUG
+#endif
+
+    encapVxLAN(pkt_data, vxlan_src, vxlan_dst, send_descr);
 }
